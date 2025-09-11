@@ -1,4 +1,13 @@
-# how to build house
++++
+title = "How to Build a House"
+description = "A step-by-step guide on building a house."
+date = 2025-09-11
+
+[author]
+name = "Nicholas Kim"
+email = "nickdraggy@gmail.com"
++++
+
 
 Items: 4000 bricks, 2000 wood, 4000 pounds rock
 

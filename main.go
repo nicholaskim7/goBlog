@@ -7,7 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/adrg/frontmatter"
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 )
@@ -62,8 +64,13 @@ func (fr FileReader) Read(slug string) (string, error) {
 
 type PostData struct {
 	Content template.HTML
-	Author  string
-	Title   string
+	Author  Author `toml:"author"`
+	Title   string `toml:"title"`
+}
+
+type Author struct {
+	Name  string `toml:"name"`
+	Email string `toml:"email"`
 }
 
 // PostHandler is a "higher-order function". It takes a SlugReader dependency
@@ -92,20 +99,25 @@ func PostHandler(sl SlugReader, tpl *template.Template) http.HandlerFunc {
 			return
 		}
 
+		// extract frontmatter from postMarkDown
+		var post PostData
+		remainingMd, err := frontmatter.Parse(strings.NewReader(postMarkdown), &post)
+		if err != nil {
+			http.Error(w, "Error parsing front matter", http.StatusInternalServerError)
+			return
+		}
+
 		var buf bytes.Buffer
-		// convert the postMarkDown into a buffer
+		// convert the remaining postMarkDown into a buffer
 		// The mdRenderer.Convert method requires a byte slice, (interface returns string so convert to byte slice)
-		err = mdRenderer.Convert([]byte(postMarkdown), &buf)
+		err = mdRenderer.Convert([]byte(remainingMd), &buf)
 		if err != nil {
 			panic(err)
 		}
+		// put remaining content into post
+		post.Content = template.HTML(buf.String())
 
-		err = tpl.Execute(w, PostData{
-			// Cast to template.HTML to prevent Go's template engine from auto-escaping the HTML.
-			Content: template.HTML(buf.String()),
-			Author:  "Nicholas Kim",
-			Title:   "My Blog", // hardcoded for now
-		})
+		err = tpl.Execute(w, post)
 		if err != nil {
 			http.Error(w, "Error executing template", http.StatusInternalServerError)
 			return
