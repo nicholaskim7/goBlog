@@ -1,38 +1,33 @@
-package main
+package goBlog
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
 	"io"
-	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/adrg/frontmatter"
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 )
 
-func main() {
-	// Create a new request router (also called a "serve mux").
-	mux := http.NewServeMux()
+// query all the meta data for all blog posts
+type MetadataQuerier interface {
+	Query() ([]PostMetadata, error)
+}
 
-	// Parse the HTML template file once at startup.
-	postTemplate := template.Must(template.ParseFiles("post.gohtml"))
-
-	// Register a handler for GET requests to /posts/{slug}.
-	// PostHandler is a factory that creates the actual handler function.
-	mux.HandleFunc("GET /posts/{slug}", PostHandler(FileReader{}, postTemplate))
-
-	// Start the web server on port 3030, using our mux to handle requests.
-	// This is a blocking call.
-	err := http.ListenAndServe(":3030", mux)
-
-	// If the server fails to start, log the error and exit the program.
-	if err != nil {
-		log.Fatal(err)
-	}
+// meta data at the top of each blog post
+type PostMetadata struct {
+	Slug        string
+	Title       string    `toml:"title"`
+	Author      Author    `toml:"author"`
+	Description string    `toml:"description"`
+	Date        time.Time `toml:"date"`
 }
 
 // SlugReader defines a contract for any type that can read content based on a slug.
@@ -42,13 +37,18 @@ type SlugReader interface {
 }
 
 // FileReader is a type that implements the SlugReader interface by reading from local files.
-type FileReader struct{}
+type FileReader struct {
+	// Directory to find blog posts in
+	Dir string
+}
 
 // Read finds and reads a markdown file from the disk corresponding to the slug.
 // FileReader has a method named Read with same signature. FileReader is recognized as implementing SlugReader
 func (fr FileReader) Read(slug string) (string, error) {
+	// include directory to path
+	slugPath := filepath.Join(fr.Dir, slug+".md")
 	// open mark down file
-	f, err := os.Open(slug + ".md")
+	f, err := os.Open(slugPath)
 	if err != nil {
 		return "", err
 	}
@@ -61,6 +61,37 @@ func (fr FileReader) Read(slug string) (string, error) {
 	// cast contents to string
 	return string(b), nil
 } // FileReader can now be used anywhere a SlugReader is expected.
+
+func (fr FileReader) Query() ([]PostMetadata, error) {
+	// include directory to path
+	postsPath := filepath.Join(fr.Dir, "*.md")
+	// Glob all the markdown files in the current directory
+	filenames, err := filepath.Glob(postsPath)
+	if err != nil {
+		return nil, fmt.Errorf("querying for files: %w", err)
+	}
+	var posts []PostMetadata
+	for _, filename := range filenames {
+		// Open each file
+		f, err := os.Open(filename)
+		if err != nil {
+			return nil, fmt.Errorf("opening file %q: %w", filename, err)
+		}
+		defer f.Close()
+		var post PostMetadata
+		//parse frontmatter into post
+		_, err = frontmatter.Parse(f, &post)
+		if err != nil {
+			return nil, fmt.Errorf("parsing frontmatter for file %s: %w", filename, err)
+		}
+		// get the base filename and remove the .md suffix to get the slug
+		post.Slug = strings.TrimSuffix(filepath.Base(filename), ".md")
+		// append post to posts slice
+		posts = append(posts, post)
+		//TODO Open file, Read metadata, place into posts slice
+	}
+	return posts, nil
+}
 
 type PostData struct {
 	Content template.HTML
@@ -118,6 +149,28 @@ func PostHandler(sl SlugReader, tpl *template.Template) http.HandlerFunc {
 		post.Content = template.HTML(buf.String())
 
 		err = tpl.Execute(w, post)
+		if err != nil {
+			http.Error(w, "Error executing template", http.StatusInternalServerError)
+			return
+		}
+	}
+}
+
+type IndexData struct {
+	Posts []PostMetadata
+}
+
+func IndexHandler(mq MetadataQuerier, tpl *template.Template) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		posts, err := mq.Query()
+		if err != nil {
+			http.Error(w, "Error querying posts", http.StatusInternalServerError)
+			return
+		}
+		data := IndexData{
+			Posts: posts,
+		}
+		err = tpl.Execute(w, data)
 		if err != nil {
 			http.Error(w, "Error executing template", http.StatusInternalServerError)
 			return
