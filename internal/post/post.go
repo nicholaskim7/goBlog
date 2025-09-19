@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-// contract for querying all the meta data for all blog posts
+// contract for querying all the metadata for all blog posts
+// Any type that wants to be considered a MetadataQuerier must have a method called Query() that takes no arguments and returns a []PostMetadata and an error
 type MetadataQuerier interface {
 	Query() ([]PostMetadata, error)
 }
@@ -16,7 +17,7 @@ type SlugReader interface {
 	Read(slug string) (string, error)
 }
 
-// meta data at the top of each blog post
+// metadata at the top of each blog post
 type PostMetadata struct {
 	Slug        string
 	Title       string    `toml:"title"`
